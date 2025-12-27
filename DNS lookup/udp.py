@@ -14,20 +14,6 @@ def forward_query(query_data):
     up.close()
     return response
 
-# hepler to extract question section from dig query
-# can be skipped to question parsing stage 
-# but added here for answer verification
-
-def extract_question(data):
-    offset = 12
-    # skip QNAME(labels)
-    while data[offset] != 0:
-        offset+=1
-    offset+=1
-    # QTYPE(2) + QCLASS(2)
-    offset+=4
-    return data[12:offset]
-
 def compressor(data, offset):
     labels = []
     jumped = False
@@ -56,7 +42,7 @@ def compressor(data, offset):
     else:
         return name, offset
 
-# extract TTL from answer RR to cache
+# extract minimum TTL from answer RR to cache
 def extract_ttl(data, answer_count, offset):
     ttls=[]
     for _ in range(answer_count):
@@ -95,29 +81,6 @@ def question_parser(data, offset = 12):
     question = {"qname": qname, "qtype": qtype, "qclass": qclass, "end_offset": offset}
     return question
 
-def build_dns_header(transaction_id, rd_flag, ancount):
-    flags = 0
-    flags |= (1 << 15)          # QR = 1 
-    flags |= (rd_flag << 8)     # copy RD bit
-    # flags |= 0                  # RCODE = 0 (NOERROR). 
-
-    qdcount = 1
-    # ancount = 0
-    nscount = 0
-    arcount = 0
-
-    return struct.pack(
-        "!HHHHHH", transaction_id, flags, qdcount, ancount, nscount, arcount)
-
-def build_answer_section():
-    name = 0xC00C   # name compression (pointer to QNAME)
-    rtype = 1       # A
-    rclass = 1      # IN
-    ttl = 60
-    rdlength = 4    # IPv4
-    rdata = socket.inet_aton("1.2.3.4")
-
-    return struct.pack("!HHHLH4s", name, rtype, rclass, ttl, rdlength, rdata)
 
 def server():
     fd = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -126,32 +89,26 @@ def server():
 
     while True:
         data,addr = fd.recvfrom(512)
-        # transaction_id = struct.unpack("!H", data[0:2])[0]
-        # request_flags = struct.unpack("!H", data[2:4])[0]
-        # rd_flag = (request_flags >> 8) & 1
+        
         # header parser
         header = header_parser(data)
-        print(
-        f"[DNS] id={header['id']} "
-        f"qr={header['qr']} rd={header['rd']} "
-        f"qd={header['qdcount']} an={header['ancount']} "
-        f"ar={header['arcount']}"
-)   
-        # question parser (1 question)
+        # print(f"[DNS] id={header['id']} " f"qr={header['qr']} rd={header['rd']} " f"qd={header['qdcount']} an={header['ancount']} " f"ar={header['arcount']}")   
+        
+        # question parser (1 question) 
+        # [DNS header] [question]
         question = question_parser(data)
-        print(
-        f"[Q] name={question['qname']} "
-        f"type={question['qtype']} "
-        f"class={question['qclass']}"
-)
+        # print(f"[Q] name={question['qname']} " f"type={question['qtype']} " f"class={question['qclass']}")
+        
         key = (question["qname"], question["qtype"], question["qclass"])
+        
         # cache hit
         if key in cache and cache[key]["expires_at"] > time.time():
             cached = cache[key]["response"]
             response = struct.pack("!H", header["id"]) + cached[2:]
             fd.sendto(response, addr)
-            print("[CACHE HIT]", key) # <- did not return print statement the second time
+            print("[CACHE HIT]", key)
             continue
+        
         # cache miss -> forward
         upstream_response = forward_query(data)
         up_header = header_parser(upstream_response)
@@ -160,17 +117,10 @@ def server():
             ttl = extract_ttl(upstream_response, up_header["ancount"], question_parser(upstream_response)["end_offset"])
             cache[key] = {
                 "response": upstream_response,
-                "expires_at": time.time() + ttl
+                "expires_at": time.time() + max(ttl, 30)    # keep TTL for atleast 30 seconds
             }
         response = struct.pack("!H", header["id"]) + upstream_response[2:]
-        fd.sendto(response, addr)
-
-        # # [DNS header] [question]
-        # question_section = extract_question(data) 
-        # answer = build_answer_section()
-        # response_header = build_dns_header(transaction_id, rd_flag, ancount=1)
-        # response = response_header + question_section + answer
-        # fd.sendto(response, addr)   # echo dns response header + question + answer (hardcoded)
+        fd.sendto(response, addr)   # return dns response message 
 
 if __name__ == "__main__":
     server()
