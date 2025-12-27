@@ -1,9 +1,18 @@
-from bz2 import compress
+import time
 import socket
 import struct
 
 DNS_IP = "0.0.0.0"
 DNS_PORT = 5000
+UPSTREAM_DNS = ("8.8.8.8", 53)
+cache = {}
+def forward_query(query_data):
+    up = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    up.settimeout(2)
+    up.sendto(query_data, UPSTREAM_DNS)
+    response, _ = up.recvfrom(4096)         # safe: EDNS may exceed 512 
+    up.close()
+    return response
 
 # hepler to extract question section from dig query
 # can be skipped to question parsing stage 
@@ -46,6 +55,17 @@ def compressor(data, offset):
         return name, original_offset + 2
     else:
         return name, offset
+
+# extract TTL from answer RR to cache
+def extract_ttl(data, answer_count, offset):
+    ttls=[]
+    for _ in range(answer_count):
+        _, offset = compressor(data, offset)
+        _, _, ttl, rdlength = struct.unpack("!HHLH", data[offset:offset+10])
+        offset += 10
+        offset += rdlength
+        ttls.append(ttl)
+    return min(ttls) if ttls else 0
 
 def header_parser(data):
     if len(data) < 12:
@@ -106,9 +126,9 @@ def server():
 
     while True:
         data,addr = fd.recvfrom(512)
-        transaction_id = struct.unpack("!H", data[0:2])[0]
-        request_flags = struct.unpack("!H", data[2:4])[0]
-        rd_flag = (request_flags >> 8) & 1
+        # transaction_id = struct.unpack("!H", data[0:2])[0]
+        # request_flags = struct.unpack("!H", data[2:4])[0]
+        # rd_flag = (request_flags >> 8) & 1
         # header parser
         header = header_parser(data)
         print(
@@ -124,12 +144,33 @@ def server():
         f"type={question['qtype']} "
         f"class={question['qclass']}"
 )
-        # [DNS header] [question]
-        question_section = extract_question(data) 
-        answer = build_answer_section()
-        response_header = build_dns_header(transaction_id, rd_flag, ancount=1)
-        response = response_header + question_section + answer
-        fd.sendto(response, addr)   # echo dns response header + question + answer (hardcoded)
+        key = (question["qname"], question["qtype"], question["qclass"])
+        # cache hit
+        if key in cache and cache[key]["expires_at"] > time.time():
+            cached = cache[key]["response"]
+            response = struct.pack("!H", header["id"]) + cached[2:]
+            fd.sendto(response, addr)
+            print("[CACHE HIT]", key) # <- did not return print statement the second time
+            continue
+        # cache miss -> forward
+        upstream_response = forward_query(data)
+        up_header = header_parser(upstream_response)
+
+        if up_header["ancount"] > 0:
+            ttl = extract_ttl(upstream_response, up_header["ancount"], question_parser(upstream_response)["end_offset"])
+            cache[key] = {
+                "response": upstream_response,
+                "expires_at": time.time() + ttl
+            }
+        response = struct.pack("!H", header["id"]) + upstream_response[2:]
+        fd.sendto(response, addr)
+
+        # # [DNS header] [question]
+        # question_section = extract_question(data) 
+        # answer = build_answer_section()
+        # response_header = build_dns_header(transaction_id, rd_flag, ancount=1)
+        # response = response_header + question_section + answer
+        # fd.sendto(response, addr)   # echo dns response header + question + answer (hardcoded)
 
 if __name__ == "__main__":
     server()
