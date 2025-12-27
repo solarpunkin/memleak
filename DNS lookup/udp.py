@@ -18,6 +18,27 @@ def extract_question(data):
     offset+=4
     return data[12:offset]
 
+def header_parser(data):
+    if len(data) < 12:
+        raise ValueError("Packet too short to be DNS")
+    (transaction_id, flags, qdcount, ancount, nscount, arcount) = struct.unpack("!HHHHHH", data[:12])
+    header = {
+        "id": transaction_id,
+        "flags": flags,
+        "qr": (flags >> 15) & 1,
+        "opcode": (flags >> 11) & 0xF,
+        "aa": (flags >> 10) & 1,
+        "tc": (flags >> 9) & 1,
+        "rd": (flags >> 8) & 1,
+        "ra": (flags >> 7) & 1,
+        "rcode": flags & 0xF,
+        "qdcount": qdcount,
+        "ancount": ancount,
+        "nscount": nscount,
+        "arcount": arcount,
+    }
+    return header
+
 def build_dns_header(transaction_id, rd_flag, ancount):
     flags = 0
     flags |= (1 << 15)          # QR = 1 
@@ -52,6 +73,14 @@ def server():
         transaction_id = struct.unpack("!H", data[0:2])[0]
         request_flags = struct.unpack("!H", data[2:4])[0]
         rd_flag = (request_flags >> 8) & 1
+        # header parser
+        header = header_parser(data)
+        print(
+        f"[DNS] id={header['id']} "
+        f"qr={header['qr']} rd={header['rd']} "
+        f"qd={header['qdcount']} an={header['ancount']} "
+        f"ar={header['arcount']}"
+)
         # [DNS header] [question]
         question_section = extract_question(data) 
         answer = build_answer_section()
