@@ -1,3 +1,4 @@
+from bz2 import compress
 import socket
 import struct
 
@@ -17,6 +18,34 @@ def extract_question(data):
     # QTYPE(2) + QCLASS(2)
     offset+=4
     return data[12:offset]
+
+def compressor(data, offset):
+    labels = []
+    jumped = False
+    original_offset = offset
+    while True:
+        length = data[offset]
+        if (length & 0xC0) == 0xC0:
+            pt = struct.unpack("!H", data[offset:offset+2])[0]
+            offset = pt & 0x3FFF
+            jumped = True
+            continue
+
+        # end of name
+        if length == 0:
+            offset+=1
+            break
+
+        offset += 1
+        label = data[offset:offset+length].decode("ascii")
+        labels.append(label)
+        offset+=length
+
+    name = ".".join(labels)
+    if jumped:
+        return name, original_offset + 2
+    else:
+        return name, offset
 
 def header_parser(data):
     if len(data) < 12:
@@ -40,19 +69,7 @@ def header_parser(data):
     return header
 
 def question_parser(data, offset = 12):
-    labels=[]
-    
-    while True:
-        length = data[offset]
-        if length == 0:
-            offset+=1
-            break
-
-        offset+=1
-        label = data[offset:offset + length].decode("ascii")
-        labels.append(label)
-        offset += length
-    qname = ".".join(labels)
+    qname, offset = compressor(data, offset)
     qtype, qclass = struct.unpack("!HH", data[offset:offset+4])
     offset+=4
     question = {"qname": qname, "qtype": qtype, "qclass": qclass, "end_offset": offset}
