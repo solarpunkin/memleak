@@ -39,6 +39,25 @@ def header_parser(data):
     }
     return header
 
+def question_parser(data, offset = 12):
+    labels=[]
+    
+    while True:
+        length = data[offset]
+        if length == 0:
+            offset+=1
+            break
+
+        offset+=1
+        label = data[offset:offset + length].decode("ascii")
+        labels.append(label)
+        offset += length
+    qname = ".".join(labels)
+    qtype, qclass = struct.unpack("!HH", data[offset:offset+4])
+    offset+=4
+    question = {"qname": qname, "qtype": qtype, "qclass": qclass, "end_offset": offset}
+    return question
+
 def build_dns_header(transaction_id, rd_flag, ancount):
     flags = 0
     flags |= (1 << 15)          # QR = 1 
@@ -80,6 +99,13 @@ def server():
         f"qr={header['qr']} rd={header['rd']} "
         f"qd={header['qdcount']} an={header['ancount']} "
         f"ar={header['arcount']}"
+)   
+        # question parser (1 question)
+        question = question_parser(data)
+        print(
+        f"[Q] name={question['qname']} "
+        f"type={question['qtype']} "
+        f"class={question['qclass']}"
 )
         # [DNS header] [question]
         question_section = extract_question(data) 
