@@ -8,7 +8,7 @@ def build_dns_header(transaction_id, rd_flag):
     flags = 0
     flags |= (1 << 15)          # QR = 1 
     flags |= (rd_flag << 8)     # copy RD bit
-    flags |= 0                  # RCODE = 0 (NOERROR)
+    # flags |= 0                  # RCODE = 0 (NOERROR). 
 
     qdcount = 1
     ancount = 0
@@ -35,8 +35,11 @@ def server():
         transaction_id = struct.unpack("!H", data[0:2])[0]
         request_flags = struct.unpack("!H", data[2:4])[0]
         rd_flag = (request_flags >> 8) & 1
+        # [DNS header] [question]
+        question_section = data[12:] 
         response_header = build_dns_header(transaction_id, rd_flag)
-        fd.sendto(response_header, addr)   # echo dns response header
+        response = response_header + question_section
+        fd.sendto(response, addr)   # echo dns response header + question
 
 if __name__ == "__main__":
     server()
