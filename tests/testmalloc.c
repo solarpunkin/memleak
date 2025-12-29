@@ -1,10 +1,10 @@
 #include <stdio.h>
 #include <stdint.h>
 
-#define malloc   my_malloc
-#define free     my_free
-#define calloc   my_calloc
-#define realloc  my_realloc
+#define malloc   _malloc
+#define free     _free
+#define calloc   _calloc
+#define realloc  _realloc
 
 #include "mallocreuse.c"
 
