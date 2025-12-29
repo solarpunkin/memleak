@@ -10,7 +10,7 @@
 typedef struct block_meta {
     size_t size;
     struct block_meta *next;
-    int my_free;  
+    int _free;  
     uint32_t magic;
 } block_meta;
 
@@ -20,7 +20,7 @@ static block_meta *global_base = NULL;
 
 static block_meta *find_free_block(block_meta **last, size_t size) {
     block_meta *current = global_base;
-    while(current && !(current->my_free && current->size >= size))
+    while(current && !(current->_free && current->size >= size))
     {
         *last = current;
         current = current->next;
@@ -36,7 +36,7 @@ static block_meta *request_space(block_meta *last, size_t size) {
     if (last) last->next = block;
     block->size = size;
     block->next = NULL;
-    block->my_free = 0;
+    block->_free = 0;
     block->magic = 0xCAFEBABE;
     return block;
 }
@@ -46,7 +46,7 @@ static block_meta *get_block_ptr(void *ptr) {
 }
 
 // malloc
-void *my_malloc(size_t size) {
+void *_malloc(size_t size) {
     if (size==0) {
         return NULL;
     }
@@ -67,43 +67,43 @@ void *my_malloc(size_t size) {
         }
         else {
             // sufficient space -- reuse block 
-            assert(block->my_free == 1);
-            block->my_free = 0;
+            assert(block->_free == 1);
+            block->_free = 0;
             block->magic = 0xDEADBEEF;
         }
     }
     return (block + 1);
 }
 
-void my_free(void *ptr) {
+void _free(void *ptr) {
     if (!ptr) return;
     block_meta *block = get_block_ptr(ptr);
-    assert(block->my_free==0);
+    assert(block->_free==0);
     assert(block->magic==0xCAFEBABE || block->magic==0xDEADBEEF);
-    block->my_free = 1;
+    block->_free = 1;
     block->magic = 0xFEEDFACE;
 }
 
-void *my_calloc(size_t nmemb, size_t size) {
+void *_calloc(size_t nmemb, size_t size) {
     size_t total = nmemb*size;
-    void *ptr = my_malloc(total);
+    void *ptr = _malloc(total);
     if (!ptr) return NULL;
     memset(ptr, 0, total);
     return ptr;
 }
 
-void *my_realloc(void *ptr, size_t size)
+void *_realloc(void *ptr, size_t size)
 {
     if (!ptr) {
-        return my_malloc(size);
+        return _malloc(size);
     }
     block_meta *block = get_block_ptr(ptr);
     if (block->size >= size) return ptr;
-    void *new_ptr = my_malloc(size);
+    void *new_ptr = _malloc(size);
     if(!new_ptr) return NULL;
 
     memcpy(new_ptr, ptr, block->size);
-    my_free(ptr);
+    _free(ptr);
     return new_ptr;
 }
 
@@ -112,11 +112,11 @@ void dump_heap(void) {
     fprintf(stderr, "----- HEAP DUMP -----\n");
     while (cur) {
         fprintf(stderr,
-            "block=%p payload=%p size=%zu my_free=%d magic=0x%x next=%p\n",
+            "block=%p payload=%p size=%zu _free=%d magic=0x%x next=%p\n",
             (void *)cur,
             (void *)(cur + 1),
             cur->size,
-            cur->my_free,
+            cur->_free,
             cur->magic,
             (void *)cur->next
         );
