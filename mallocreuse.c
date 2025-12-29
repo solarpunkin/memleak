@@ -5,7 +5,8 @@
 #include <unistd.h>
 #include <assert.h>
 
-// [metadata] [payload] [metadata] [payload] [metadata] [payload] ... (heap grows)
+// [metadata] [payload] [metadata] [payload] [metadata] [payload] ... (heap grows) <-- before coalescing
+// [header] [payload] [footer] [header] [payload] [footer] ... <-- now
 
 typedef struct block_meta {
     size_t size;
@@ -15,6 +16,7 @@ typedef struct block_meta {
 } block_meta;
 
 #define META_SIZE sizeof(block_meta)
+#define FOOTER_SIZE sizeof(size_t)
 
 static block_meta *global_base = NULL;
 
@@ -30,7 +32,7 @@ static block_meta *find_free_block(block_meta **last, size_t size) {
 
 static block_meta *request_space(block_meta *last, size_t size) {
     block_meta *block = sbrk(0);
-    void *request = sbrk(size + META_SIZE);
+    void *request = sbrk(size + META_SIZE + FOOTER_SIZE);
     if (request == (void*)-1)  return NULL;
     assert (block == request);
     if (last) last->next = block;
@@ -38,12 +40,24 @@ static block_meta *request_space(block_meta *last, size_t size) {
     block->next = NULL;
     block->_free = 0;
     block->magic = 0xCAFEBABE;
+    size_t *footer = (size_t *)((char *) (block + 1) + size);
+    *footer = size;
     return block;
 }
 
 static block_meta *get_block_ptr(void *ptr) {
     return (block_meta *)ptr -1 ;
 }
+
+static block_meta *next_block(block_meta *block) {
+    return block->next;
+}
+
+static block_meta *prev_block(block_meta *block) {
+    size_t prev_size = *(size_t *)((char *)block - FOOTER_SIZE);
+    return (block_meta *)((char *)block - prev_size - META_SIZE - FOOTER_SIZE);
+}
+
 
 // malloc
 void *_malloc(size_t size) {
@@ -78,10 +92,25 @@ void *_malloc(size_t size) {
 void _free(void *ptr) {
     if (!ptr) return;
     block_meta *block = get_block_ptr(ptr);
-    assert(block->_free==0);
-    assert(block->magic==0xCAFEBABE || block->magic==0xDEADBEEF);
+    // assert(block->_free==0);
+    // assert(block->magic==0xCAFEBABE || block->magic==0xDEADBEEF);
     block->_free = 1;
     block->magic = 0xFEEDFACE;
+    
+    block_meta *next = next_block(block);
+    if (next && next->free) {
+        block->size += META_SIZE + FOOTER_SIZE + next->size;
+        block->next = next->next;
+        size_t  *footer = (size_t *)((char *)(block + 1) + block->size);
+        *footer = block->size;
+    }
+    if (block != global_base) {
+        block_meta *prev = prev_block(block);
+        if (prev->free) {
+            prev->free += META_SIZE + FOOTER_SIZE + block->size;
+            
+        }
+    }
 }
 
 void *_calloc(size_t nmemb, size_t size) {
