@@ -11,7 +11,7 @@
 typedef struct block_meta {
     size_t size;
     struct block_meta *next;
-    int _free;  
+    int is_free;  
     uint32_t magic;
 } block_meta;
 
@@ -22,7 +22,7 @@ static block_meta *global_base = NULL;
 
 static block_meta *find_free_block(block_meta **last, size_t size) {
     block_meta *current = global_base;
-    while(current && !(current->_free && current->size >= size))
+    while(current && !(current->is_free && current->size >= size))
     {
         *last = current;
         current = current->next;
@@ -38,7 +38,7 @@ static block_meta *request_space(block_meta *last, size_t size) {
     if (last) last->next = block;
     block->size = size;
     block->next = NULL;
-    block->_free = 0;
+    block->is_free = 0;
     block->magic = 0xCAFEBABE;
     size_t *footer = (size_t *)((char *) (block + 1) + size);
     *footer = size;
@@ -81,20 +81,20 @@ void *_malloc(size_t size) {
         }
         else {
             // sufficient space -- reuse block 
-            assert(block->_free == 1);
-            block->_free = 0;
+            assert(block->is_free == 1);
+            block->is_free = 0;
             block->magic = 0xDEADBEEF;
         }
     }
     return (block + 1);
 }
 
-void _free(void *ptr) {
+void is_free(void *ptr) {
     if (!ptr) return;
     block_meta *block = get_block_ptr(ptr);
-    // assert(block->_free==0);
+    // assert(block->is_free==0);
     // assert(block->magic==0xCAFEBABE || block->magic==0xDEADBEEF);
-    block->_free = 1;
+    block->is_free = 1;
     block->magic = 0xFEEDFACE;
     
     block_meta *next = next_block(block);
@@ -132,7 +132,7 @@ void *_realloc(void *ptr, size_t size)
     if(!new_ptr) return NULL;
 
     memcpy(new_ptr, ptr, block->size);
-    _free(ptr);
+    is_free(ptr);
     return new_ptr;
 }
 
@@ -141,11 +141,11 @@ void dump_heap(void) {
     fprintf(stderr, "----- HEAP DUMP -----\n");
     while (cur) {
         fprintf(stderr,
-            "block=%p payload=%p size=%zu _free=%d magic=0x%x next=%p\n",
+            "block=%p payload=%p size=%zu free=%d magic=0x%x next=%p\n",
             (void *)cur,
             (void *)(cur + 1),
             cur->size,
-            cur->_free,
+            cur->is_free,
             cur->magic,
             (void *)cur->next
         );
