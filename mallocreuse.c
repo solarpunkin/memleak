@@ -98,7 +98,7 @@ void is_free(void *ptr) {
     block->magic = 0xFEEDFACE;
     
     block_meta *next = next_block(block);
-    if (next && next->free) {
+    if (next && next->is_free) {
         block->size += META_SIZE + FOOTER_SIZE + next->size;
         block->next = next->next;
         size_t  *footer = (size_t *)((char *)(block + 1) + block->size);
@@ -106,8 +106,8 @@ void is_free(void *ptr) {
     }
     if (block != global_base) {
         block_meta *prev = prev_block(block);
-        if (prev->free) {
-            prev->free += META_SIZE + FOOTER_SIZE + block->size;
+        if (prev->is_free) {
+            prev->size += META_SIZE + FOOTER_SIZE + block->size;
             
         }
     }
