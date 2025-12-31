@@ -2,7 +2,7 @@
 #include <stdint.h>
 
 #define malloc   _malloc
-#define free     _free
+#define free     is_free
 #define calloc   _calloc
 #define realloc  _realloc
 
